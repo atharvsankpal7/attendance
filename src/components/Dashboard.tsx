@@ -38,12 +38,12 @@ export default function Dashboard({ batchId }: DashboardProps) {
     try {
       const defaulters = data.records.filter(r => r.is_defaulter);
 
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-defaulter-emails`,
+        `${apiBase}/send-defaulter-emails`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ defaulters })
@@ -139,7 +139,7 @@ export default function Dashboard({ batchId }: DashboardProps) {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
                   outerRadius={80}
                   fill="#8884d8"
                   dataKey="value"
@@ -175,7 +175,7 @@ export default function Dashboard({ batchId }: DashboardProps) {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
                   outerRadius={80}
                   fill="#8884d8"
                   dataKey="value"
