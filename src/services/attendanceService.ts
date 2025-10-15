@@ -87,3 +87,31 @@ export const getLatestBatchId = async (): Promise<string | null> => {
   const json = await res.json();
   return json?.id || null;
 };
+
+export const getBatches = async (): Promise<UploadBatch[]> => {
+  const res = await fetch(`${API_BASE}/batches`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to fetch batches' }));
+    throw new Error(err.error || 'Failed to fetch batches');
+  }
+  const json = await res.json();
+  return json as UploadBatch[];
+};
+
+export interface HistoryEntry {
+  id: string;
+  batch_id: string;
+  batch_class_name?: string;
+  defaulter_count: number;
+  uploaded_at?: string;
+}
+
+export const getHistory = async (): Promise<HistoryEntry[]> => {
+  const res = await fetch(`${API_BASE}/history`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to fetch history' }));
+    throw new Error(err.error || 'Failed to fetch history');
+  }
+  const json = await res.json();
+  return json as HistoryEntry[];
+};

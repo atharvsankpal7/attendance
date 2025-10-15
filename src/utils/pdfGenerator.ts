@@ -1,7 +1,13 @@
 import jsPDF from 'jspdf';
 import { AnalysisData } from '../services/attendanceService';
 
-export const generatePDFReport = (data: AnalysisData) => {
+type ChartImages = {
+  genderChart?: string; // dataURL PNG
+  defaulterChart?: string;
+  barChart?: string;
+}
+
+export const generatePDFReport = (data: AnalysisData, images?: ChartImages) => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
@@ -47,6 +53,40 @@ export const generatePDFReport = (data: AnalysisData) => {
     doc.text(line, margin, yPosition);
     yPosition += 7;
   });
+
+  // Insert charts (if provided)
+  const insertImage = (dataUrl: string | undefined, caption: string) => {
+    if (!dataUrl) return;
+    try {
+      const img = new Image();
+      img.src = dataUrl;
+      // approximate image size in PDF units
+      const imgProps = (doc as any).getImageProperties(dataUrl);
+      const imgWidth = pageWidth - 2 * margin;
+      const imgHeight = (imgProps.height / imgProps.width) * imgWidth;
+
+      if (yPosition + imgHeight > doc.internal.pageSize.getHeight() - 40) {
+        doc.addPage();
+        yPosition = 20;
+      }
+
+      doc.addImage(dataUrl, 'PNG', margin, yPosition, imgWidth, imgHeight);
+      yPosition += imgHeight + 8;
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'italic');
+      doc.text(caption, margin, yPosition);
+      yPosition += 10;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+    } catch (err) {
+      // ignore image insertion errors
+      console.warn('Failed to insert chart image into PDF', err);
+    }
+  };
+
+  insertImage(images?.genderChart, 'Gender distribution');
+  insertImage(images?.defaulterChart, 'Defaulter vs Non-Defaulter');
+  insertImage(images?.barChart, 'Defaulters by Gender (Bar Chart)');
 
   yPosition += 5;
   doc.line(margin, yPosition, pageWidth - margin, yPosition);

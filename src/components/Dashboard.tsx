@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Mail, Download, Users, AlertTriangle } from 'lucide-react';
 import { AnalysisData, getAnalysisData } from '../services/attendanceService';
@@ -14,6 +14,9 @@ export default function Dashboard({ batchId }: DashboardProps) {
   const [data, setData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const genderChartRef = useRef<HTMLDivElement | null>(null);
+  const defaulterChartRef = useRef<HTMLDivElement | null>(null);
+  const barChartRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     loadData();
@@ -65,9 +68,58 @@ export default function Dashboard({ batchId }: DashboardProps) {
     }
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!data) return;
-    generatePDFReport(data);
+    // capture charts as images if possible
+    const captureSvgToPng = async (container: HTMLDivElement | null) => {
+      if (!container) return undefined;
+      const svg = container.querySelector('svg');
+      if (!svg) return undefined;
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svg);
+      try {
+        const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) throw new Error('No canvas context');
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0);
+              const png = canvas.toDataURL('image/png');
+              resolve(png);
+            } catch (err) {
+              reject(err);
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          };
+          img.onerror = (e) => {
+            URL.revokeObjectURL(url);
+            reject(e);
+          };
+          img.src = url;
+        });
+        return dataUrl;
+      } catch (err) {
+        console.warn('Failed to capture SVG as PNG', err);
+        return undefined;
+      }
+    };
+
+    const images: any = {};
+    images.genderChart = await captureSvgToPng(genderChartRef.current);
+    images.defaulterChart = await captureSvgToPng(defaulterChartRef.current);
+    images.barChart = await captureSvgToPng(barChartRef.current);
+
+    generatePDFReport(data, images);
   };
 
   if (loading) {
@@ -132,25 +184,27 @@ export default function Dashboard({ batchId }: DashboardProps) {
                 <p className="text-lg font-semibold text-pink-600">Girls: {data.genderStats.female}</p>
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={genderChartData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {genderChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            <div ref={genderChartRef}>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={genderChartData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {genderChartData.map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -168,40 +222,44 @@ export default function Dashboard({ batchId }: DashboardProps) {
                 <p className="text-lg font-semibold text-pink-600">Girls: {data.defaulterStats.female}</p>
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={defaulterChartData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  <Cell fill="#ef4444" />
-                  <Cell fill="#10b981" />
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            <div ref={defaulterChartRef}>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={defaulterChartData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    <Cell fill="#ef4444" />
+                    <Cell fill="#10b981" />
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Defaulters by Gender</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={defaulterBarData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="category" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="Defaulters" fill="#ef4444" />
-              <Bar dataKey="Non-Defaulters" fill="#10b981" />
-            </BarChart>
-          </ResponsiveContainer>
+          <div ref={barChartRef}>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={defaulterBarData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="category" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="Defaulters" fill="#ef4444" />
+                <Bar dataKey="Non-Defaulters" fill="#10b981" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">

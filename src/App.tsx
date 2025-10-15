@@ -1,29 +1,62 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import DashboardFromRoute from './components/DashboardFromRoute';
 import Home from './components/Home';
-import Dashboard from './components/Dashboard';
+// Dashboard is loaded via the route wrapper
 import { getLatestBatchId } from './services/attendanceService';
 
 function App() {
-  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    loadLatestBatch();
-  }, []);
+    (async () => {
+      // Only attempt auto-redirect when user is on the home path
+      if (location.pathname !== '/') {
+        setLoading(false);
+        return;
+      }
 
-  const loadLatestBatch = async () => {
-    try {
-      const batchId = await getLatestBatchId();
-      setCurrentBatchId(batchId);
-    } catch (error) {
-      console.error('Error loading latest batch:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const skipRaw = sessionStorage.getItem('skipAutoRedirect');
+        if (skipRaw) {
+          try {
+            const parsed = JSON.parse(skipRaw);
+            const expires = parsed?.expires || 0;
+            if (Date.now() < expires) {
+              setLoading(false);
+              return;
+            } else {
+              sessionStorage.removeItem('skipAutoRedirect');
+            }
+          } catch (e) {
+            sessionStorage.removeItem('skipAutoRedirect');
+          }
+        }
+
+        // Only run auto-redirect once per session to avoid bouncing back when user navigates home
+        const executed = sessionStorage.getItem('autoRedirectExecuted');
+        if (executed) {
+          setLoading(false);
+          return;
+        }
+
+        const batchId = await getLatestBatchId();
+        if (batchId) {
+          sessionStorage.setItem('autoRedirectExecuted', '1');
+          navigate(`/dashboard/${batchId}`, { replace: true });
+        }
+      } catch (error) {
+        console.error('Error loading latest batch:', error);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [location.pathname, navigate]);
 
   const handleUploadSuccess = (batchId: string) => {
-    setCurrentBatchId(batchId);
+    navigate(`/dashboard/${batchId}`);
   };
 
   if (loading) {
@@ -37,11 +70,17 @@ function App() {
     );
   }
 
-  if (currentBatchId) {
-    return <Dashboard batchId={currentBatchId} />;
-  }
+  return (
+    <Routes>
+      <Route path="/" element={<Home onUploadSuccess={handleUploadSuccess} />} />
+      <Route path="/dashboard/:batchId" element={<DashboardWrapper />} />
+    </Routes>
+  );
+}
 
-  return <Home onUploadSuccess={handleUploadSuccess} />;
+function DashboardWrapper() {
+  // Dashboard will read batchId from route params itself
+  return <DashboardFromRoute />;
 }
 
 export default App;

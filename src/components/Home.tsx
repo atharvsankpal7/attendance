@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Upload, Download, FileSpreadsheet, BarChart3 } from 'lucide-react';
 import { generateExcelTemplate, parseExcelFile } from '../utils/excelTemplate';
-import { uploadAttendanceData } from '../services/attendanceService';
+import { uploadAttendanceData, getHistory } from '../services/attendanceService';
+import { useNavigate } from 'react-router-dom';
 
 interface HomeProps {
   onUploadSuccess: (batchId: string) => void;
@@ -10,6 +11,23 @@ interface HomeProps {
 export default function Home({ onUploadSuccess }: HomeProps) {
   const [uploading, setUploading] = useState(false);
   const [className, setClassName] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    (async () => {
+      setLoadingHistory(true);
+      try {
+        const h = await getHistory();
+        setHistory(h);
+      } catch (err) {
+        console.error('Failed to load history', err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    })();
+  }, []);
 
   const handleDownloadTemplate = () => {
     generateExcelTemplate();
@@ -200,6 +218,28 @@ export default function Home({ onUploadSuccess }: HomeProps) {
           <p className="text-blue-200 text-sm">
             Powered by Modern Web Technologies
           </p>
+        </div>
+        <div className="max-w-4xl w-full mt-8">
+          <div className="bg-white rounded-2xl p-6">
+            <h3 className="text-lg font-semibold mb-4">Scan History</h3>
+            {loadingHistory ? <p>Loading...</p> : (
+              <div className="space-y-3">
+                {history.length === 0 && <p className="text-gray-600">No scans yet</p>}
+                {history.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between p-3 border rounded-md">
+                    <div>
+                      <div className="font-semibold">{h.batch_class_name || 'Unknown Class'}</div>
+                      <div className="text-sm text-gray-500">{new Date(h.uploaded_at || '').toLocaleString()}</div>
+                      <div className="text-sm text-gray-600">Defaulters: {h.defaulter_count}</div>
+                    </div>
+                    <div>
+                      <button onClick={() => navigate(`/dashboard/${h.batch_id}`)} className="px-3 py-2 bg-blue-600 text-white rounded-md">View</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

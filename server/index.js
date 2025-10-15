@@ -23,7 +23,8 @@ const UploadBatchSchema = new Schema({
     total_defaulters: { type: Number, default: 0 },
     average_attendance: { type: Number, default: 0 },
     uploaded_by: { type: String, default: '' },
-    uploaded_at: { type: Date, default: Date.now }
+    uploaded_at: { type: Date, default: Date.now },
+    records: [{ type: Schema.Types.ObjectId, ref: 'AttendanceRecord' }]
 });
 
 const AttendanceRecordSchema = new Schema({
@@ -44,6 +45,16 @@ const AttendanceRecordSchema = new Schema({
 
 const UploadBatch = mongoose.model('UploadBatch', UploadBatchSchema);
 const AttendanceRecord = mongoose.model('AttendanceRecord', AttendanceRecordSchema);
+
+const HistorySchema = new Schema({
+    batch: { type: Schema.Types.ObjectId, ref: 'UploadBatch' },
+    defaulter_count: { type: Number, default: 0 },
+    defaulters: [{ type: Schema.Types.ObjectId, ref: 'AttendanceRecord' }],
+    uploaded_at: { type: Date, default: Date.now },
+    uploaded_by: { type: String, default: '' }
+});
+
+const History = mongoose.model('History', HistorySchema);
 
 const nodemailer = require('nodemailer');
 
@@ -102,7 +113,20 @@ app.post('/api/upload', async (req, res) => {
             class_name: className
         }));
 
-        await AttendanceRecord.insertMany(attendanceDocs);
+        const inserted = await AttendanceRecord.insertMany(attendanceDocs);
+
+        // attach record ids to batch
+        batch.records = inserted.map(d => d._id);
+        await batch.save();
+
+        // create a history record for this scan
+        const defaulterDocs = inserted.filter(d => d.is_defaulter);
+        await History.create({
+            batch: batch._id,
+            defaulter_count: defaulterDocs.length,
+            defaulters: defaulterDocs.map(d => d._id),
+            uploaded_by: 'Teacher'
+        });
 
         return res.json({ id: batch._id });
     } catch (err) {
@@ -116,6 +140,43 @@ app.get('/api/batches/latest', async (req, res) => {
         const batch = await UploadBatch.findOne().sort({ uploaded_at: -1 }).lean();
         if (!batch) return res.json(null);
         return res.json({ id: batch._id });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Return list of all batches (history)
+app.get('/api/batches', async (req, res) => {
+    try {
+        const batches = await UploadBatch.find().sort({ uploaded_at: -1 }).lean();
+        const mapped = batches.map(b => ({
+            id: b._id,
+            class_name: b.class_name,
+            total_students: b.total_students,
+            total_defaulters: b.total_defaulters,
+            average_attendance: b.average_attendance,
+            uploaded_at: b.uploaded_at
+        }));
+        return res.json(mapped);
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Return history scan entries
+app.get('/api/history', async (req, res) => {
+    try {
+        const entries = await History.find().sort({ uploaded_at: -1 }).populate('batch').lean();
+        const mapped = entries.map(e => ({
+            id: e._id,
+            batch_id: e.batch?._id,
+            batch_class_name: e.batch?.class_name,
+            defaulter_count: e.defaulter_count,
+            uploaded_at: e.uploaded_at
+        }));
+        return res.json(mapped);
     } catch (err) {
         console.error(err);
         return res.status(500).json({ error: 'Server error' });
