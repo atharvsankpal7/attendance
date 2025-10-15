@@ -1,0 +1,163 @@
+import jsPDF from 'jspdf';
+import { AnalysisData } from '../services/attendanceService';
+
+export const generatePDFReport = (data: AnalysisData) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  let yPosition = 20;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(22);
+  doc.text('Attendance Analysis Report', pageWidth / 2, yPosition, { align: 'center' });
+
+  yPosition += 10;
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  doc.text(data.batch.class_name, pageWidth / 2, yPosition, { align: 'center' });
+
+  yPosition += 5;
+  doc.setFontSize(10);
+  doc.text(`Generated on: ${new Date().toLocaleDateString()}`, pageWidth / 2, yPosition, { align: 'center' });
+
+  yPosition += 15;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(margin, yPosition, pageWidth - margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('Summary Statistics', margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+
+  const summaryData = [
+    `Total Students: ${data.batch.total_students}`,
+    `Male Students: ${data.genderStats.male}`,
+    `Female Students: ${data.genderStats.female}`,
+    `Total Defaulters: ${data.defaulterStats.total} (${((data.defaulterStats.total / data.batch.total_students) * 100).toFixed(1)}%)`,
+    `Male Defaulters: ${data.defaulterStats.male}`,
+    `Female Defaulters: ${data.defaulterStats.female}`,
+    `Average Attendance: ${data.insights.averageAttendance.toFixed(2)}%`
+  ];
+
+  summaryData.forEach(line => {
+    doc.text(line, margin, yPosition);
+    yPosition += 7;
+  });
+
+  yPosition += 5;
+  doc.line(margin, yPosition, pageWidth - margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('Key Insights', margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+
+  doc.text(`Highest Attendance: ${data.insights.highestAttendance.name} (${data.insights.highestAttendance.percentage.toFixed(2)}%)`, margin, yPosition);
+  yPosition += 7;
+  doc.text(`Lowest Attendance: ${data.insights.lowestAttendance.name} (${data.insights.lowestAttendance.percentage.toFixed(2)}%)`, margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Top 5 Students:', margin, yPosition);
+  yPosition += 7;
+  doc.setFont('helvetica', 'normal');
+
+  data.insights.topStudents.forEach((student, idx) => {
+    doc.text(`${idx + 1}. ${student.name} - ${student.percentage.toFixed(2)}%`, margin + 5, yPosition);
+    yPosition += 6;
+  });
+
+  if (data.defaulterStats.total > 0) {
+    doc.addPage();
+    yPosition = 20;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Defaulter List', margin, yPosition);
+
+    yPosition += 10;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+
+    const headers = ['Roll No', 'Name', 'Gender', 'Attendance %'];
+    const colWidths = [25, 60, 25, 30];
+    let xPos = margin;
+
+    headers.forEach((header, idx) => {
+      doc.text(header, xPos, yPosition);
+      xPos += colWidths[idx];
+    });
+
+    yPosition += 7;
+    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+    yPosition += 5;
+
+    doc.setFont('helvetica', 'normal');
+    const defaulters = data.records.filter(r => r.is_defaulter);
+
+    defaulters.forEach((record) => {
+      if (yPosition > 270) {
+        doc.addPage();
+        yPosition = 20;
+      }
+
+      xPos = margin;
+      const rowData = [
+        record.roll_number,
+        record.name.length > 20 ? record.name.substring(0, 20) + '...' : record.name,
+        record.gender,
+        `${record.attendance_percentage.toFixed(2)}%`
+      ];
+
+      rowData.forEach((cell, idx) => {
+        doc.text(String(cell), xPos, yPosition);
+        xPos += colWidths[idx];
+      });
+
+      yPosition += 7;
+    });
+  }
+
+  doc.addPage();
+  yPosition = 20;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('Recommendations', margin, yPosition);
+
+  yPosition += 10;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+
+  const recommendations = [
+    '1. Conduct one-on-one meetings with defaulters to understand their challenges.',
+    '2. Implement a mentorship program pairing low-attendance students with high performers.',
+    '3. Send regular attendance reminders to students and parents.',
+    '4. Consider flexible attendance policies for students with genuine reasons.',
+    '5. Recognize and reward students with excellent attendance records.',
+    '6. Monitor attendance trends weekly to identify early warning signs.',
+  ];
+
+  recommendations.forEach(rec => {
+    const lines = doc.splitTextToSize(rec, pageWidth - 2 * margin);
+    lines.forEach((line: string) => {
+      doc.text(line, margin, yPosition);
+      yPosition += 7;
+    });
+  });
+
+  yPosition += 10;
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text('This report is auto-generated by the Attendance Monitoring System', pageWidth / 2, yPosition, { align: 'center' });
+
+  doc.save(`attendance_report_${data.batch.class_name}_${new Date().toISOString().split('T')[0]}.pdf`);
+};
