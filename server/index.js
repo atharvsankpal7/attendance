@@ -1,4 +1,25 @@
-require('dotenv').config();
+const path = require('path');
+const dotenv = require('dotenv');
+
+// Try loading .env from common locations and log which (if any) was loaded.
+const envCandidates = [
+    path.resolve(__dirname, '.env'),       // server/.env
+    path.resolve(__dirname, '..', '.env'), // repo root .env
+    path.resolve(process.cwd(), '.env')    // current working dir .env
+];
+let loadedEnv = null;
+for (const p of envCandidates) {
+    try {
+        const result = dotenv.config({ path: p });
+        if (!result.error) {
+            loadedEnv = p;
+            break;
+        }
+    } catch (e) {
+        // ignore and try next
+    }
+}
+console.log('dotenv loaded from:', loadedEnv || 'none (no .env found in common locations)');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -60,25 +81,64 @@ const nodemailer = require('nodemailer');
 
 // Setup mail transporter if env provided
 let mailTransporter = null;
+// IMPORTANT: do NOT provide secrets/defaults in source code. Read from env only.
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || 'Attendance <no-reply@example.com>';
+const EMAIL_FROM = process.env.EMAIL_FROM;
 
-if (EMAIL_USER && EMAIL_PASS) {
-    mailTransporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: EMAIL_USER,
-            pass: EMAIL_PASS
+async function setupMailTransporter() {
+    if (!EMAIL_USER || !EMAIL_PASS) {
+        console.warn('Mail transporter not configured: EMAIL_USER or EMAIL_PASS missing. Running in simulation mode.');
+        return null;
+    }
+
+    // Try port 465 (secure) first, then fallback to 587 (STARTTLS)
+    const attempts = [
+        { host: 'smtp.gmail.com', port: 465, secure: true, label: 'smtp.gmail.com:465 (SSL)' },
+        { host: 'smtp.gmail.com', port: 587, secure: false, label: 'smtp.gmail.com:587 (STARTTLS)' }
+    ];
+
+    for (const a of attempts) {
+        try {
+            const transporter = nodemailer.createTransport({
+                host: a.host,
+                port: a.port,
+                secure: a.secure,
+                auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+                tls: { rejectUnauthorized: false }
+            });
+
+            // wrap verify in a promise so we can await result synchronously
+            await new Promise((resolve, reject) => {
+                transporter.verify((err, success) => {
+                    if (err) return reject(err);
+                    return resolve(success);
+                });
+            });
+
+            console.log('Mail transporter ready (SMTP -> ' + a.label + ') for', EMAIL_USER);
+
+            // attach optional debug hooks
+            transporter.on && transporter.on('idle', () => console.debug('Mail transporter idle event'));
+            return transporter;
+        } catch (err) {
+            console.warn(`Mail transporter verification failed for ${a.label}:`, err && (err.message || err));
+            // try next
         }
-    });
+    }
 
-    // verify transporter
-    mailTransporter.verify((err, success) => {
-        if (err) console.warn('Mail transporter verification failed:', err.message || err);
-        else console.log('Mail transporter ready');
-    });
+    console.error('All mail transporter verification attempts failed. Mail will run in simulation mode.');
+    return null;
 }
+
+(async () => {
+    try {
+        mailTransporter = await setupMailTransporter();
+    } catch (err) {
+        console.error('Unexpected error while setting up mail transporter:', err && (err.message || err));
+        mailTransporter = null;
+    }
+})();
 
 // Routes
 app.post('/api/upload', async (req, res) => {
@@ -231,15 +291,19 @@ app.post('/api/send-defaulter-emails', async (req, res) => {
         if (!Array.isArray(defaulters)) return res.status(400).json({ error: 'Invalid payload' });
 
         const results = [];
+        console.log('/api/send-defaulter-emails called, defaulters count=', defaulters.length);
 
         if (!mailTransporter) {
-            // Not configured: simulate
+            // Not configured: simulate and return explicit flag so caller can react
+            console.warn('Mail transporter not configured: running in simulation mode for send-defaulter-emails');
             const simulated = defaulters.map(d => ({ success: true, email: d.student_email, message: `Email simulated for ${d.name}` }));
             const successCount = simulated.filter(r => r.success).length;
-            return res.json({ success: true, sent: successCount, total: defaulters.length, results: simulated, message: 'Email simulation completed. Set EMAIL_USER and EMAIL_PASS to send real emails.' });
+            console.debug('Simulated results sample:', simulated.slice(0, 3));
+            return res.status(200).json({ success: true, simulated: true, sent: successCount, total: defaulters.length, results: simulated, message: 'Email simulation completed. Set EMAIL_USER and EMAIL_PASS (Gmail app password) in server .env to send real emails.' });
         }
 
         for (const d of defaulters) {
+            console.debug('Preparing to send email to:', d.student_email, 'cc:', d.parent_email, 'name:', d.name);
             const mailOptions = {
                 from: EMAIL_FROM,
                 to: d.student_email,
@@ -254,11 +318,21 @@ app.post('/api/send-defaulter-emails', async (req, res) => {
             };
 
             try {
+                const start = Date.now();
                 const info = await mailTransporter.sendMail(mailOptions);
-                results.push({ success: true, email: d.student_email, message: `Sent: ${info.messageId}` });
+                const duration = Date.now() - start;
+                console.log(`Email sent to ${d.student_email} messageId=${info && info.messageId} duration=${duration}ms`);
+                console.debug('SMTP accepted/rejected:', info && { accepted: info.accepted, rejected: info.rejected });
+                results.push({ success: true, email: d.student_email, message: `Sent: ${info.messageId || 'unknown'}`, info: { accepted: info.accepted, rejected: info.rejected } });
             } catch (err) {
-                console.error('Failed to send email to', d.student_email, err);
-                results.push({ success: false, email: d.student_email, error: err.message || String(err) });
+                console.error('Failed to send email to', d.student_email, 'error:', err && (err.message || err));
+                // If nodemailer gives response with response or code, include it
+                const errDetails = {
+                    message: err && err.message,
+                    code: err && err.code,
+                    response: err && err.response
+                };
+                results.push({ success: false, email: d.student_email, error: errDetails });
             }
         }
 
