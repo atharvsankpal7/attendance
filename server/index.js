@@ -45,6 +45,30 @@ const AttendanceRecordSchema = new Schema({
 const UploadBatch = mongoose.model('UploadBatch', UploadBatchSchema);
 const AttendanceRecord = mongoose.model('AttendanceRecord', AttendanceRecordSchema);
 
+const nodemailer = require('nodemailer');
+
+// Setup mail transporter if env provided
+let mailTransporter = null;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Attendance <no-reply@example.com>';
+
+if (EMAIL_USER && EMAIL_PASS) {
+    mailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: EMAIL_USER,
+            pass: EMAIL_PASS
+        }
+    });
+
+    // verify transporter
+    mailTransporter.verify((err, success) => {
+        if (err) console.warn('Mail transporter verification failed:', err.message || err);
+        else console.log('Mail transporter ready');
+    });
+}
+
 // Routes
 app.post('/api/upload', async (req, res) => {
     try {
@@ -145,10 +169,40 @@ app.post('/api/send-defaulter-emails', async (req, res) => {
         const { defaulters } = req.body;
         if (!Array.isArray(defaulters)) return res.status(400).json({ error: 'Invalid payload' });
 
-        // For now, simulate sending and return a summary like original supabase function did
-        const results = defaulters.map(d => ({ success: true, email: d.student_email, message: `Email simulated for ${d.name}` }));
+        const results = [];
+
+        if (!mailTransporter) {
+            // Not configured: simulate
+            const simulated = defaulters.map(d => ({ success: true, email: d.student_email, message: `Email simulated for ${d.name}` }));
+            const successCount = simulated.filter(r => r.success).length;
+            return res.json({ success: true, sent: successCount, total: defaulters.length, results: simulated, message: 'Email simulation completed. Set EMAIL_USER and EMAIL_PASS to send real emails.' });
+        }
+
+        for (const d of defaulters) {
+            const mailOptions = {
+                from: EMAIL_FROM,
+                to: d.student_email,
+                cc: d.parent_email,
+                subject: 'Attendance Alert - Low Attendance Warning',
+                html: `
+                <p>Dear ${d.name},</p>
+                <p>Your attendance is ${Number(d.attendance_percentage).toFixed(2)}% which is below the required threshold of 75%.</p>
+                <p>Please contact your academic advisor and take immediate action.</p>
+                <p>Regards,<br/>Attendance Monitoring Team</p>
+                `
+            };
+
+            try {
+                const info = await mailTransporter.sendMail(mailOptions);
+                results.push({ success: true, email: d.student_email, message: `Sent: ${info.messageId}` });
+            } catch (err) {
+                console.error('Failed to send email to', d.student_email, err);
+                results.push({ success: false, email: d.student_email, error: err.message || String(err) });
+            }
+        }
+
         const successCount = results.filter(r => r.success).length;
-        return res.json({ success: true, sent: successCount, total: defaulters.length, results, message: 'Email simulation completed. Configure SMTP to send real emails.' });
+        return res.json({ success: true, sent: successCount, total: defaulters.length, results, message: 'Emails processed (some may have failed). See results for details.' });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ error: 'Server error' });

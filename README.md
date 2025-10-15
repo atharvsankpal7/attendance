@@ -19,6 +19,22 @@ npm install
 
 If you prefer, I can continue and try to delete those files from the repository directly — tell me if you want me to attempt that again.
 
+## Configuring Gmail SMTP (App Password)
+
+To enable real email sending from the local backend via Gmail:
+
+1. Enable 2-Step Verification for your Google account.
+2. Create an App Password (select Mail, then select the device or 'Other').
+3. Copy the generated app password and set the following env variables locally (for example in `.env` or environment):
+
+```
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASS=your_app_password_here
+EMAIL_FROM="Attendance <no-reply@yourdomain.com>"
+```
+
+4. Restart the server (cd server && npm run dev). The backend will attempt to send emails via Gmail. If it fails or env vars are not set, it falls back to the simulated behavior and returns a summary.
+
 ## Switching to local MERN backend (already added)
 
 This repository now includes a minimal Express + MongoDB backend under `server/` for local development.
