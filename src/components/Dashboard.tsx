@@ -75,24 +75,54 @@ export default function Dashboard({ batchId }: DashboardProps) {
       if (!container) return undefined;
       const svg = container.querySelector('svg');
       if (!svg) return undefined;
-      const serializer = new XMLSerializer();
-      const svgString = serializer.serializeToString(svg);
+
+      // Clone the svg node so we can modify it safely
+      const clonedSvg = svg.cloneNode(true) as SVGSVGElement;
+
+      // Inline computed styles to preserve appearance
+      const copyComputedStyles = (sourceEl: Element, targetEl: Element) => {
+        const sourceChildren = Array.from(sourceEl.children);
+        const targetChildren = Array.from(targetEl.children);
+        const sourceStyle = (window.getComputedStyle(sourceEl) || {}) as any;
+        (targetEl as HTMLElement).setAttribute('style', sourceStyle.cssText || '');
+        for (let i = 0; i < sourceChildren.length; i++) {
+          if (targetChildren[i]) copyComputedStyles(sourceChildren[i], targetChildren[i]);
+        }
+      };
+
       try {
+        copyComputedStyles(svg, clonedSvg);
+
+        // Ensure width/height attributes exist on the cloned svg
+        const bbox = (svg as SVGGraphicsElement).getBBox ? (svg as SVGGraphicsElement).getBBox() : null;
+        const width = svg.getAttribute('width') || (bbox ? String(bbox.width) : svg.clientWidth || '800');
+        const height = svg.getAttribute('height') || (bbox ? String(bbox.height) : svg.clientHeight || '400');
+        clonedSvg.setAttribute('width', String(width));
+        clonedSvg.setAttribute('height', String(height));
+
+        const serializer = new XMLSerializer();
+        const svgString = serializer.serializeToString(clonedSvg);
+
         const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const img = new Image();
         img.crossOrigin = 'anonymous';
+
         const dataUrl = await new Promise<string>((resolve, reject) => {
           img.onload = () => {
             try {
               const canvas = document.createElement('canvas');
-              canvas.width = img.width;
-              canvas.height = img.height;
+              // scale up for better quality
+              const scale = 2;
+              const w = (img.width || Number(width)) * scale;
+              const h = (img.height || Number(height)) * scale;
+              canvas.width = w;
+              canvas.height = h;
               const ctx = canvas.getContext('2d');
               if (!ctx) throw new Error('No canvas context');
               ctx.fillStyle = '#ffffff';
               ctx.fillRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0);
+              ctx.drawImage(img, 0, 0, w, h);
               const png = canvas.toDataURL('image/png');
               resolve(png);
             } catch (err) {
@@ -107,6 +137,7 @@ export default function Dashboard({ batchId }: DashboardProps) {
           };
           img.src = url;
         });
+
         return dataUrl;
       } catch (err) {
         console.warn('Failed to capture SVG as PNG', err);
